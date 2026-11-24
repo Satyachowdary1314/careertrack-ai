@@ -14,3 +14,7 @@ desktop.ini
 # Local environment and secrets
 .env
 .env.*
+!.env.example
+
+# Local exports / personal browser data
+benchtrack-backup-*.json

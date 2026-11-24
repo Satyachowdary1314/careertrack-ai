@@ -1,380 +1,65 @@
 "use strict";
 
-const STORAGE_KEY = "careertrack-ai-applications";
-const THEME_KEY = "careertrack-ai-theme";
-const STATUSES = ["Saved", "Applied", "Interview", "Offer", "Rejected"];
-
-const elements = {
-  list: document.querySelector("#applications-list"),
-  empty: document.querySelector("#empty-state"),
-  noResults: document.querySelector("#no-results"),
-  dialog: document.querySelector("#application-dialog"),
-  form: document.querySelector("#application-form"),
-  search: document.querySelector("#search-input"),
-  filter: document.querySelector("#status-filter"),
-  chart: document.querySelector("#status-chart"),
-  calendar: document.querySelector("#calendar-grid"),
-  calendarLabel: document.querySelector("#calendar-month-label"),
-  toast: document.querySelector("#toast")
+// Browser-only prototype. The storage adapter is intentionally isolated so it can
+// later be replaced with an authenticated API/PostgreSQL repository.
+const DB_KEY = "benchtrack-crm-v1";
+const THEME_KEY = "benchtrack-theme";
+const STATUSES = ["New Requirement","RTR Pending","RTR Confirmed","Submitted to Vendor","Submitted to Client","Shortlisted","Interview Scheduled","Interview Completed","Offer Received","Placed","On Hold","Rejected","Withdrawn"];
+const CALL_OUTCOMES = ["Connected","Voicemail","No answer","Follow-up required","Interested","Not interested","Meeting scheduled"];
+const FOLLOWUP_STATUSES = ["Pending","Completed","Cancelled"];
+const schemas = {
+  consultants:{label:"Consultants",singular:"Consultant",icon:"♙",fields:[f("name","Consultant name","text",true),f("technology","Primary technology","text",true),f("skills","Skills (comma separated)","text"),f("experience","Years of experience","number"),f("workAuth","Work authorization","select",false,["H-1B","OPT","CPT","Green Card","US Citizen","EAD","Other"]),f("location","Current location","text"),f("rate","Expected C2C rate ($/hr)","number"),f("availability","Availability","select",false,["Immediate","2 weeks","30 days","Unavailable"]),f("employee","Marketing employee","text"),f("status","Consultant status","select",false,["Active","Marketing","Interviewing","Placed","Inactive"]),f("notes","Notes","textarea")]},
+  vendors:{label:"Vendors & recruiters",singular:"Vendor / recruiter",icon:"▧",fields:[f("company","Vendor company name","text",true),f("recruiter","Recruiter name","text",true),f("designation","Designation","text"),f("email","Email address","email"),f("officePhone","Office phone","tel"),f("cellPhone","Cell phone","tel"),f("linkedin","LinkedIn URL","url"),f("website","Company website","url"),f("vendorType","Relationship type","select",false,["Prime vendor","Implementation partner","Staffing vendor","End client","Other"]),f("endClients","Associated end clients","text"),f("technologies","Technologies recruited","text"),f("lastContacted","Last contacted","date"),f("notes","Notes","textarea")]},
+  submissions:{label:"Submissions",singular:"Submission",icon:"⇧",fields:[f("consultantId","Consultant","relation",true,"consultants"),f("position","Position / job title","text",true),f("jobId","Job ID","text"),f("jobDescription","Job description","textarea"),f("requiredSkills","Required skills","text"),f("vendorId","Vendor company","relation",false,"vendors"),f("recruiterId","Vendor recruiter","relation",false,"vendors"),f("primeVendor","Prime vendor","text"),f("endClient","End client company","text"),f("location","Location","text"),f("workMode","Work mode","select",false,["Remote","Hybrid","Onsite"]),f("rate","C2C hourly rate ($)","number"),f("duration","Contract duration","text"),f("submittedAt","Submission date and time","datetime-local"),f("employee","Marketing employee","text"),f("rtrStatus","RTR status","select",false,["Not requested","Pending","Confirmed"]),f("status","Submission status","select",false,STATUSES),f("nextFollowup","Next follow-up","date"),f("feedback","Recruiter feedback","textarea"),f("notes","Notes","textarea")]},
+  calls:{label:"Call log",singular:"Call",icon:"◉",fields:[f("direction","Call direction","select",true,["Incoming","Outgoing","Missed"]),f("dateTime","Call date and time","datetime-local",true),f("vendorId","Vendor / recruiter","relation",false,"vendors"),f("phone","Phone number","tel"),f("consultantId","Consultant discussed","relation",false,"consultants"),f("submissionId","Related submission","relation",false,"submissions"),f("position","Position","text"),f("client","Client","text"),f("duration","Call duration (minutes)","number"),f("notes","Discussion notes","textarea"),f("outcome","Call outcome","select",false,CALL_OUTCOMES),f("nextFollowup","Next follow-up","date"),f("employee","Marketing employee","text")]},
+  interviews:{label:"Interviews",singular:"Interview",icon:"◷",fields:[f("consultantId","Consultant","relation",true,"consultants"),f("submissionId","Submission","relation",false,"submissions"),f("position","Position","text",true),f("client","Client","text"),f("dateTime","Interview date and time","datetime-local",true),f("timezone","Timezone","text"),f("round","Interview round","text"),f("meetingLink","Meeting link","url"),f("status","Interview status","select",false,["Scheduled","Completed","Cancelled","Rescheduled"]),f("feedback","Feedback","textarea")]},
+  followups:{label:"Follow-ups",singular:"Follow-up",icon:"☑",fields:[f("title","Follow-up subject","text",true),f("dueDate","Due date","date",true),f("priority","Priority","select",false,["Low","Normal","High","Urgent"]),f("status","Status","select",false,FOLLOWUP_STATUSES),f("consultantId","Consultant","relation",false,"consultants"),f("vendorId","Vendor / recruiter","relation",false,"vendors"),f("submissionId","Submission","relation",false,"submissions"),f("employee","Assigned employee","text"),f("notes","Notes","textarea")]}
 };
-
-let applications = loadApplications();
-let calendarMonth = new Date();
-calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
-let toastTimeout;
-
-function loadApplications() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    return Array.isArray(saved) ? saved : [];
-  } catch (error) {
-    console.error("Could not read saved applications:", error);
-    return [];
-  }
-}
-
-function saveApplications() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(applications));
-  } catch (error) {
-    showToast("Could not save data. Check your browser storage settings.");
-    console.error("Could not save applications:", error);
-  }
-}
-
-function escapeHTML(value = "") {
-  return String(value).replace(/[&<>"']/g, character => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;"
-  })[character]);
-}
-
-function statusClass(status) {
-  return String(status || "Saved").toLowerCase().replace(/[^a-z]/g, "");
-}
-
-function formatDate(value) {
-  if (!value) return "—";
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return "—";
-  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  });
-}
-
-function todayISO() {
-  const now = new Date();
-  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
-  return localDate.toISOString().slice(0, 10);
-}
-
-function render() {
-  renderApplications();
-  renderStats();
-  renderChart();
-  renderCalendar();
-}
-
-function renderApplications() {
-  const query = elements.search.value.trim().toLowerCase();
-  const selectedStatus = elements.filter.value;
-
-  const filtered = applications
-    .filter(application => {
-      const searchable = [
-        application.company,
-        application.role,
-        application.recruiter,
-        application.salary
-      ].join(" ").toLowerCase();
-      return searchable.includes(query);
-    })
-    .filter(application => selectedStatus === "All" || application.status === selectedStatus)
-    .sort((a, b) => (b.dateApplied || "").localeCompare(a.dateApplied || ""));
-
-  elements.list.innerHTML = filtered.map(application => {
-    const company = escapeHTML(application.company || "Untitled company");
-    const role = escapeHTML(application.role || "Role not specified");
-    const initial = escapeHTML((application.company || "?").trim().charAt(0).toUpperCase());
-    const salary = escapeHTML(application.salary || "—");
-    const recruiter = escapeHTML(application.recruiter || "—");
-    const status = STATUSES.includes(application.status) ? application.status : "Saved";
-
-    return `
-      <tr>
-        <td>
-          <div class="company-cell">
-            <span class="company-logo">${initial}</span>
-            <span>
-              <span class="company-name">${company}</span>
-              <span class="role-name">${role}</span>
-            </span>
-          </div>
-        </td>
-        <td class="salary-cell">${salary}</td>
-        <td>${formatDate(application.dateApplied)}</td>
-        <td><span class="status-badge status-${statusClass(status)}">${escapeHTML(status)}</span></td>
-        <td class="recruiter-cell">${recruiter}</td>
-        <td>
-          <div class="row-actions">
-            <button class="row-action" type="button" data-action="edit" data-id="${escapeHTML(application.id)}" aria-label="Edit ${company}" title="Edit">✎</button>
-            <button class="row-action delete" type="button" data-action="delete" data-id="${escapeHTML(application.id)}" aria-label="Delete ${company}" title="Delete">×</button>
-          </div>
-        </td>
-      </tr>
-    `;
-  }).join("");
-
-  const hasApplications = applications.length > 0;
-  elements.empty.hidden = hasApplications;
-  elements.noResults.hidden = !hasApplications || filtered.length > 0;
-  elements.list.closest("table").hidden = !hasApplications || filtered.length === 0;
-}
-
-function renderStats() {
-  const total = applications.length;
-  const interviews = applications.filter(item => item.status === "Interview").length;
-  const offers = applications.filter(item => item.status === "Offer").length;
-  const responses = interviews + offers;
-  const responseRate = total ? Math.round((responses / total) * 100) : 0;
-
-  document.querySelector("#stat-total").textContent = total;
-  document.querySelector("#stat-interviews").textContent = interviews;
-  document.querySelector("#stat-offers").textContent = offers;
-  document.querySelector("#stat-response").textContent = `${responseRate}%`;
-}
-
-function renderChart() {
-  const counts = Object.fromEntries(STATUSES.map(status => [
-    status,
-    applications.filter(item => item.status === status).length
-  ]));
-  const maximum = Math.max(1, ...Object.values(counts));
-
-  if (!applications.length) {
-    elements.chart.innerHTML = `<p class="chart-empty">Add an application to see your pipeline.</p>`;
-    return;
-  }
-
-  elements.chart.innerHTML = STATUSES.map(status => {
-    const count = counts[status];
-    const width = count ? Math.max(5, (count / maximum) * 100) : 0;
-    return `
-      <div class="chart-row">
-        <span class="chart-label">${status}</span>
-        <div class="chart-track"><div class="chart-bar ${statusClass(status)}" style="width:${width}%"></div></div>
-        <span class="chart-count">${count}</span>
-      </div>
-    `;
-  }).join("");
-}
-
-function renderCalendar() {
-  const year = calendarMonth.getFullYear();
-  const month = calendarMonth.getMonth();
-  elements.calendarLabel.textContent = calendarMonth.toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric"
-  });
-
-  const firstDay = new Date(year, month, 1);
-  const mondayFirstOffset = (firstDay.getDay() + 6) % 7;
-  const gridStart = new Date(year, month, 1 - mondayFirstOffset);
-  const today = todayISO();
-  const interviewDates = new Set(
-    applications
-      .filter(application => application.interviewDate)
-      .map(application => application.interviewDate)
-  );
-
-  const cells = [];
-  for (let index = 0; index < 42; index++) {
-    const day = new Date(gridStart);
-    day.setDate(gridStart.getDate() + index);
-    const dateString = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
-    const classes = ["calendar-day"];
-    if (day.getMonth() !== month) classes.push("muted");
-    if (dateString === today) classes.push("today");
-    if (interviewDates.has(dateString)) classes.push("has-interview");
-
-    cells.push(`<span class="${classes.join(" ")}" ${interviewDates.has(dateString) ? `title="Interview scheduled: ${formatDate(dateString)}"` : ""}>${day.getDate()}</span>`);
-  }
-
-  elements.calendar.innerHTML = cells.join("");
-}
-
-function openDialog(application = null) {
-  elements.form.reset();
-  document.querySelector("#application-id").value = "";
-  document.querySelector("#dialog-title").textContent = application ? "Edit application" : "Add application";
-  document.querySelector("#save-button").textContent = application ? "Save changes" : "Save application";
-
-  if (application) {
-    document.querySelector("#application-id").value = application.id;
-    document.querySelector("#company-input").value = application.company || "";
-    document.querySelector("#role-input").value = application.role || "";
-    document.querySelector("#salary-input").value = application.salary || "";
-    document.querySelector("#recruiter-input").value = application.recruiter || "";
-    document.querySelector("#date-input").value = application.dateApplied || "";
-    document.querySelector("#status-input").value = STATUSES.includes(application.status) ? application.status : "Saved";
-    document.querySelector("#interview-date-input").value = application.interviewDate || "";
-    document.querySelector("#job-link-input").value = application.jobLink || "";
-    document.querySelector("#notes-input").value = application.notes || "";
-  } else {
-    document.querySelector("#date-input").value = todayISO();
-    document.querySelector("#status-input").value = "Applied";
-  }
-
-  elements.dialog.showModal();
-  document.querySelector("#company-input").focus();
-}
-
-function closeDialog() {
-  elements.dialog.close();
-}
-
-function showToast(message) {
-  elements.toast.textContent = message;
-  elements.toast.classList.add("visible");
-  clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => elements.toast.classList.remove("visible"), 2600);
-}
-
-function downloadCSV() {
-  if (!applications.length) {
-    showToast("Add an application before exporting.");
-    return;
-  }
-
-  const columns = [
-    ["Company", "company"],
-    ["Role", "role"],
-    ["Salary", "salary"],
-    ["Recruiter", "recruiter"],
-    ["Date Applied", "dateApplied"],
-    ["Status", "status"],
-    ["Interview Date", "interviewDate"],
-    ["Job Link", "jobLink"],
-    ["Notes", "notes"]
-  ];
-
-  const escapeCSV = value => `"${String(value ?? "").replace(/"/g, '""')}"`;
-  const rows = [
-    columns.map(([label]) => escapeCSV(label)).join(","),
-    ...applications.map(application =>
-      columns.map(([, key]) => escapeCSV(application[key])).join(",")
-    )
-  ];
-
-  const blob = new Blob(["\uFEFF" + rows.join("\r\n")], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `careertrack-applications-${todayISO()}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-  showToast("Your CSV export is ready.");
-}
-
-elements.form.addEventListener("submit", event => {
-  event.preventDefault();
-  if (!elements.form.reportValidity()) return;
-
-  const id = document.querySelector("#application-id").value;
-  const application = {
-    id: id || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
-    company: document.querySelector("#company-input").value.trim(),
-    role: document.querySelector("#role-input").value.trim(),
-    salary: document.querySelector("#salary-input").value.trim(),
-    recruiter: document.querySelector("#recruiter-input").value.trim(),
-    dateApplied: document.querySelector("#date-input").value,
-    status: document.querySelector("#status-input").value,
-    interviewDate: document.querySelector("#interview-date-input").value,
-    jobLink: document.querySelector("#job-link-input").value.trim(),
-    notes: document.querySelector("#notes-input").value.trim()
-  };
-
-  if (id) {
-    applications = applications.map(existing => existing.id === id ? application : existing);
-    showToast("Application updated.");
-  } else {
-    applications.push(application);
-    showToast("Application added.");
-  }
-
-  saveApplications();
-  render();
-  closeDialog();
-});
-
-elements.list.addEventListener("click", event => {
-  const button = event.target.closest("button[data-action]");
-  if (!button) return;
-
-  const application = applications.find(item => item.id === button.dataset.id);
-  if (!application) return;
-
-  if (button.dataset.action === "edit") {
-    openDialog(application);
-  } else if (button.dataset.action === "delete") {
-    const confirmed = window.confirm(`Delete the application for ${application.company}?`);
-    if (!confirmed) return;
-    applications = applications.filter(item => item.id !== application.id);
-    saveApplications();
-    render();
-    showToast("Application deleted.");
-  }
-});
-
-document.querySelector("#add-application").addEventListener("click", () => openDialog());
-document.querySelector("#empty-add-button").addEventListener("click", () => openDialog());
-document.querySelector("#close-dialog").addEventListener("click", closeDialog);
-document.querySelector("#cancel-dialog").addEventListener("click", closeDialog);
-document.querySelector("#export-csv").addEventListener("click", downloadCSV);
-elements.search.addEventListener("input", renderApplications);
-elements.filter.addEventListener("change", renderApplications);
-
-elements.dialog.addEventListener("click", event => {
-  if (event.target === elements.dialog) closeDialog();
-});
-
-document.querySelector("#previous-month").addEventListener("click", () => {
-  calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1);
-  renderCalendar();
-});
-document.querySelector("#next-month").addEventListener("click", () => {
-  calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1);
-  renderCalendar();
-});
-
-const themeToggle = document.querySelector("#theme-toggle");
-
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  themeToggle.textContent = theme === "dark" ? "☀" : "☾";
-  themeToggle.setAttribute("aria-label", theme === "dark" ? "Switch to light mode" : "Switch to dark mode");
-}
-
-const savedTheme = localStorage.getItem(THEME_KEY);
-applyTheme(savedTheme === "dark" ? "dark" : "light");
-
-themeToggle.addEventListener("click", () => {
-  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  localStorage.setItem(THEME_KEY, nextTheme);
-  applyTheme(nextTheme);
-});
-
-document.querySelector("#today-label").textContent = new Date().toLocaleDateString(undefined, {
-  weekday: "long",
-  month: "long",
-  day: "numeric"
-}).toUpperCase();
-
+function f(key,label,type="text",required=false,options=null){return {key,label,type,required,options};}
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+let db=loadDB(), currentView="dashboard", editId=null, toastTimer;
+function uid(prefix="REC"){return `${prefix}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2,7).toUpperCase()}`}
+function loadDB(){try{const raw=JSON.parse(localStorage.getItem(DB_KEY)||"null");if(raw&&raw.version===1&&raw.data)return raw.data;}catch(e){console.warn("BenchTrack data could not be read",e)}const data=seedData();try{localStorage.setItem(DB_KEY,JSON.stringify({version:1,data}))}catch(e){}return data}
+function seedData(){const today=isoToday(), future=addDays(today,2), past=addDays(today,-1);const c1={id:uid("CON"),name:"Jordan Lee",technology:"Cloud Engineering",skills:"AWS, Terraform, Kubernetes",experience:"8",workAuth:"H-1B",location:"Austin, TX",rate:"88",availability:"Immediate",employee:"Alex Morgan",status:"Active",notes:"Fictional demo profile",createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};const c2={...c1,id:uid("CON"),name:"Taylor Brooks",technology:"Data Engineering",skills:"Python, Snowflake, Airflow",experience:"6",workAuth:"Green Card",location:"Raleigh, NC",rate:"82",availability:"2 weeks",employee:"Jamie Rivera",status:"Marketing",notes:"Fictional demo profile"};const v1={id:uid("VEN"),company:"Northstar Talent Group",recruiter:"Casey Reed",designation:"Senior Technical Recruiter",email:"casey.reed@example.test",officePhone:"+1 (555) 010-1200",cellPhone:"+1 (555) 010-1201",linkedin:"https://linkedin.com",website:"https://example.test",vendorType:"Staffing vendor",endClients:"Summit Retail",technologies:"Cloud, DevOps",lastContacted:today,notes:"Fictional sample vendor",createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};const v2={...v1,id:uid("VEN"),company:"Blue Oak Solutions",recruiter:"Morgan Ellis",designation:"Account Manager",email:"morgan.ellis@example.test",officePhone:"+1 (555) 010-2200",cellPhone:"+1 (555) 010-2201",vendorType:"Prime vendor",endClients:"Pinecone Health",technologies:"Data, Analytics"};const s1={id:uid("SUB"),consultantId:c1.id,position:"Senior Cloud Engineer",jobId:"DEMO-1042",jobDescription:"Fictional cloud platform role",requiredSkills:"AWS, Terraform",vendorId:v1.id,recruiterId:v1.id,primeVendor:"Northstar Talent Group",endClient:"Summit Retail",location:"Austin, TX",workMode:"Hybrid",rate:"88",duration:"12 months",submittedAt:new Date().toISOString(),employee:"Alex Morgan",rtrStatus:"Confirmed",status:"Interview Scheduled",nextFollowup:future,feedback:"Fictional sample activity",notes:"Demo submission",createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};const s2={...s1,id:uid("SUB"),consultantId:c2.id,position:"Data Engineer",jobId:"DEMO-2088",vendorId:v2.id,recruiterId:v2.id,endClient:"Pinecone Health",status:"Submitted to Vendor",employee:"Jamie Rivera",rtrStatus:"Pending",nextFollowup:past};const interview={id:uid("INT"),consultantId:c1.id,submissionId:s1.id,position:s1.position,client:s1.endClient,dateTime:new Date(Date.now()+86400000*2).toISOString().slice(0,16),timezone:"Central",round:"1st round",meetingLink:"https://example.test/meeting",status:"Scheduled",feedback:"",createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};const call={id:uid("CALL"),direction:"Outgoing",dateTime:new Date().toISOString().slice(0,16),vendorId:v1.id,phone:v1.cellPhone,consultantId:c1.id,submissionId:s1.id,position:s1.position,client:s1.endClient,duration:"12",notes:"Discussed fictional candidate profile",outcome:"Follow-up required",nextFollowup:future,employee:"Alex Morgan",createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};const follow={id:uid("FOL"),title:"Check interview feedback",dueDate:today,priority:"High",status:"Pending",consultantId:c1.id,vendorId:v1.id,submissionId:s1.id,employee:"Alex Morgan",notes:"Fictional reminder",createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};return {consultants:[c1,c2],vendors:[v1,v2],submissions:[s1,s2],calls:[call],interviews:[interview],followups:[follow]}}
+function persist(){try{localStorage.setItem(DB_KEY,JSON.stringify({version:1,data:db}));return true}catch(e){notify("Could not save. Browser storage may be full.");return false}}
+function escapeHTML(x=""){return String(x).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function isoToday(){const d=new Date();return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)}function addDays(date,n){const d=new Date(`${date}T12:00:00`);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)}
+function notify(msg){const t=$("#toast");t.textContent=msg;t.classList.add("visible");clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove("visible"),2600)}
+function getById(type,id){return (db[type]||[]).find(x=>x.id===id)}function person(type,id){const x=getById(type,id);return x?(type==="vendors"?`${x.company} · ${x.recruiter}`:x.name||x.position||x.title):"—"}
+function fmtDate(x){if(!x)return "—";const d=new Date(x.length===10?`${x}T12:00:00`:x);return isNaN(d)?x:d.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}
+function fmtDateTime(x){if(!x)return "—";const d=new Date(x);return isNaN(d)?x:d.toLocaleString(undefined,{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}
+function allRecords(){return Object.entries(schemas).flatMap(([type])=>db[type].map(r=>({...r,_type:type})))}
+function navigate(view){currentView=view;$$('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$("#breadcrumb").textContent=view==="vendors"?"Vendors & recruiters":view[0].toUpperCase()+view.slice(1);render()}
+function render(){const root=$("#view-root");if(currentView==="dashboard")root.innerHTML=dashboardHTML();else if(currentView==="reports")root.innerHTML=reportsHTML();else root.innerHTML=moduleHTML(currentView);bindView()}
+function dashboardHTML(){const today=isoToday(),start=$("#date-start")?.value||addDays(today,-6),end=$("#date-end")?.value||today;const inside=x=>{const val=(x.submittedAt||x.dateTime||x.createdAt||"").slice(0,10);return val>=start&&val<=end};const subs=db.submissions.filter(inside),calls=db.calls.filter(inside),placed=db.submissions.filter(x=>x.status==="Placed").length,interviews=db.submissions.filter(x=>["Interview Scheduled","Interview Completed","Offer Received","Placed"].includes(x.status)).length;const pending=db.followups.filter(x=>x.status==="Pending"),todayFollow=pending.filter(x=>x.dueDate===today).length;const incoming=calls.filter(x=>x.direction==="Incoming").length,outgoing=calls.filter(x=>x.direction==="Outgoing").length,missed=calls.filter(x=>x.direction==="Missed").length;const rate=(a,b)=>b?Math.round(a/b*100):0;const pipeline=STATUSES.map(s=>[s,db.submissions.filter(x=>x.status===s).length]);const max=Math.max(1,...pipeline.map(x=>x[1]));const employees=[...new Set([...db.submissions.map(x=>x.employee),...db.calls.map(x=>x.employee)].filter(Boolean))];const empCounts=employees.map(name=>[name,db.submissions.filter(x=>x.employee===name).length,db.calls.filter(x=>x.employee===name).length]);const maxEmp=Math.max(1,...empCounts.map(x=>x[1]+x[2]));return `<div class="page-heading"><div><p class="eyebrow">STAFFING MARKETING</p><h1>Good morning. <span>Let's move talent.</span></h1><p class="subheading">Your bench, vendor activity and placements at a glance.</p></div><div class="heading-actions"><div class="date-controls"><input id="date-start" type="date" value="${escapeHTML(start)}" aria-label="Start date"><input id="date-end" type="date" value="${escapeHTML(end)}" aria-label="End date"></div><button class="button button-primary" data-add="submissions">＋ New submission</button></div></div>
+<div class="stats-grid">${stat("Submissions",subs.length,"Selected date range","⇧")}${stat("Calls",calls.length,`In ${incoming} · Out ${outgoing} · Missed ${missed}`,"◉")}${stat("Vendors & recruiters",db.vendors.length,"Contact records","▧")}${stat("Active consultants",db.consultants.filter(x=>x.status==="Active"||x.status==="Marketing").length,"Ready for marketing","♙")}${stat("Pending follow-ups",pending.length,`${todayFollow} due today`,"☑")}${stat("Scheduled interviews",db.interviews.filter(x=>x.status==="Scheduled").length,"Upcoming interview events","◷")}${stat("Confirmed placements",placed,"Successful placements","✦")}${stat("Conversion rates",`${rate(interviews,db.submissions.length)}%`,`${rate(placed,interviews)}% interview → placement`,"↗")}</div>
+<div class="dashboard-grid"><article class="panel"><div class="panel-heading"><div><h2>Submission pipeline</h2><p>Current records by status</p></div><span class="period-label">ALL TIME</span></div><div class="chart">${pipeline.map(([s,n])=>`<div class="chart-row"><span class="chart-label">${escapeHTML(s)}</span><div class="chart-track"><div class="chart-bar" style="width:${n?Math.max(4,n/max*100):0}%"></div></div><span class="chart-count">${n}</span></div>`).join("")}</div></article>
+<article class="panel"><div class="panel-heading"><div><h2>Employee marketing activity</h2><p>Submissions and calls by employee</p></div><span class="period-label">TEAM</span></div>${empCounts.length?`<div class="mini-chart">${empCounts.map(([name,sc,cc])=>`<div class="mini-bar-wrap"><div class="mini-bar" title="${sc} submissions, ${cc} calls" style="height:${Math.max(5,(sc+cc)/maxEmp*100)}%"></div><span>${escapeHTML(name.split(" ")[0])}</span></div>`).join("")}</div><p class="helper-text">Bars combine calls + submissions. See Reports for totals.</p>`:`<p class="chart-empty">Add activity to see employee performance.</p>`}<div class="metric-strip"><div class="metric"><strong>${rate(interviews,db.submissions.length)}%</strong><span>Submission → interview</span></div><div class="metric"><strong>${rate(placed,interviews)}%</strong><span>Interview → placement</span></div><div class="metric"><strong>${incoming+outgoing+missed}</strong><span>Calls in range</span></div></div></article></div>
+<div class="dashboard-grid"><article class="panel"><div class="panel-heading"><div><h2>Follow-up reminders</h2><p>Due today and overdue tasks</p></div><button class="button button-secondary" data-go="followups">View all</button></div>${followupsPreview()}</article><article class="panel"><div class="panel-heading"><div><h2>Interview calendar</h2><p>Upcoming scheduled interviews</p></div><button class="button button-secondary" data-go="interviews">Calendar</button></div>${calendarHTML()}</article></div>`}
+function stat(title,value,note,icon){return `<article class="stat-card"><div class="stat-heading"><span>${escapeHTML(title)}</span><span class="stat-icon">${icon}</span></div><strong class="stat-value">${escapeHTML(value)}</strong><span class="stat-note">${escapeHTML(note)}</span></article>`}
+function followupsPreview(){const items=db.followups.filter(x=>x.status==="Pending").sort((a,b)=>(a.dueDate||"").localeCompare(b.dueDate||"")).slice(0,4);return items.length?`<div class="followup-list">${items.map(x=>`<div class="followup-item"><div><strong>${escapeHTML(x.title)}</strong><small>${escapeHTML(x.employee||"Unassigned")} · ${escapeHTML(x.priority||"Normal")}</small></div><span class="followup-date">${x.dueDate<isoToday()?"OVERDUE · ":""}${fmtDate(x.dueDate)}</span></div>`).join("")}</div>`:`<div class="empty-state">No pending follow-ups.</div>`}
+function calendarHTML(){const list=db.interviews.filter(x=>x.status==="Scheduled").sort((a,b)=>(a.dateTime||"").localeCompare(b.dateTime||"")).slice(0,4);return list.length?`<div class="followup-list">${list.map(x=>`<div class="followup-item"><div><strong>${escapeHTML(person("consultants",x.consultantId))} · ${escapeHTML(x.position||"Interview")}</strong><small>${escapeHTML(x.client||"Client not specified")} · ${escapeHTML(x.round||"Round TBD")}</small></div><span class="followup-date">${fmtDateTime(x.dateTime)}</span></div>`).join("")}</div>`:`<div class="empty-state">No scheduled interviews.</div>`}
+function moduleHTML(type){const schema=schemas[type];const query=($("#global-search")?.value||"").trim().toLowerCase();let rows=[...db[type]];if(query)rows=rows.filter(r=>JSON.stringify(r).toLowerCase().includes(query));const filter=$(`#filter-${type}`)?.value||"";if(filter)rows=rows.filter(r=>String(r.status||r.direction||"")===filter);rows.sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));return `<div class="page-heading"><div><p class="eyebrow">WORKSPACE / ${escapeHTML(schema.label.toUpperCase())}</p><h1>${escapeHTML(schema.label)} <span>workspace</span></h1><p class="subheading">Create, search and manage ${escapeHTML(schema.label.toLowerCase())} in one place.</p></div><div class="heading-actions"><button class="button button-primary" data-add="${type}">＋ Add ${escapeHTML(schema.singular.toLowerCase())}</button></div></div><section class="panel module-panel"><div class="module-toolbar"><div class="toolbar-left"><h2 class="module-title">${escapeHTML(schema.label)}</h2><span class="module-count">${rows.length} record${rows.length===1?"":"s"}</span></div><div class="toolbar-right"><input class="global-search local-search" data-type="${type}" type="search" placeholder="Search ${escapeHTML(schema.label.toLowerCase())}…" value="${escapeHTML(query)}"><select class="control-select" id="filter-${type}"><option value="">All statuses / types</option>${filterOptions(type).map(x=>`<option value="${escapeHTML(x)}" ${filter===x?"selected":""}>${escapeHTML(x)}</option>`).join("")}</select><select class="control-select" id="sort-${type}" aria-label="Sort table"><option value="updated">Recently updated</option><option value="created">Recently created</option><option value="name">Name / title</option></select></div></div><div class="table-wrap">${tableHTML(type,rows)}</div>${rows.length?"":`<div class="empty-state"><strong>No ${escapeHTML(schema.label.toLowerCase())} found</strong>Change your search or add your first record.</div>`}</section>`}
+function filterOptions(type){return type==="submissions"?STATUSES:type==="calls"?["Incoming","Outgoing","Missed"]:type==="followups"?FOLLOWUP_STATUSES:type==="interviews"?["Scheduled","Completed","Cancelled","Rescheduled"]:type==="consultants"?["Active","Marketing","Interviewing","Placed","Inactive"]:[]}
+function tableHTML(type,rows){const cols={consultants:[["Consultant","name","technology"],["Skills / experience","skills","experience"],["Authorization","workAuth","location"],["Rate / availability","rate","availability"],["Employee","employee","status"]],vendors:[["Vendor / recruiter","company","recruiter"],["Email / phones","email","cellPhone"],["Relationship","vendorType","designation"],["End clients","endClients","technologies"],["Last contacted","lastContacted",""]],submissions:[["Consultant / position","consultantId","position"],["Vendor / client","vendorId","endClient"],["Job ID / location","jobId","location"],["Rate / employee","rate","employee"],["Status","status","nextFollowup"]],calls:[["Direction / date","direction","dateTime"],["Vendor / phone","vendorId","phone"],["Consultant / position","consultantId","position"],["Duration / employee","duration","employee"],["Outcome / follow-up","outcome","nextFollowup"]],interviews:[["Consultant / position","consultantId","position"],["Client / round","client","round"],["Date / timezone","dateTime","timezone"],["Status","status","meetingLink"]],followups:[["Follow-up","title","notes"],["Due / priority","dueDate","priority"],["Consultant","consultantId",""],["Vendor / submission","vendorId","submissionId"],["Status / employee","status","employee"]]};const headers=cols[type];return `<table><thead><tr>${headers.map(x=>`<th>${escapeHTML(x[0].toUpperCase())}</th>`).join("")}<th>ACTIONS</th></tr></thead><tbody>${rows.map(r=>`<tr>${headers.map(([,a,b])=>`<td>${renderCell(type,r,a)}${b?`<span class="secondary-cell">${renderCell(type,r,b)}</span>`:""}</td>`).join("")}<td><div class="row-actions">${type==="vendors"&&r.email?`<a class="row-action" href="mailto:${escapeHTML(r.email)}" title="Email">✉</a>`:""}${type==="vendors"&&r.cellPhone?`<a class="row-action" href="tel:${escapeHTML(r.cellPhone)}" title="Call">☎</a>`:""}<button class="row-action" data-action="edit" data-type="${type}" data-id="${r.id}" title="Edit">✎</button><button class="row-action delete" data-action="delete" data-type="${type}" data-id="${r.id}" title="Delete">×</button></div></td></tr>`).join("")}</tbody></table>`}
+function renderCell(type,r,key){let v=r[key]??"";if(!v)return "—";if(key==="consultantId")v=person("consultants",v);if(key==="vendorId"||key==="recruiterId")v=person("vendors",v);if(key==="submissionId")v=person("submissions",v);if(["dateTime","submittedAt"].includes(key))v=fmtDateTime(v);if(["dueDate","nextFollowup","lastContacted"].includes(key))v=fmtDate(v);if(key==="rate")v=`$${v}/hr`;if(key==="status"||key==="direction"||key==="outcome"||key==="priority"||key==="rtrStatus")return `<span class="badge ${v==="Placed"||v==="Completed"||v==="Confirmed"?"green":v==="Rejected"||v==="Missed"||v==="Overdue"?"red":v==="High"||v==="Urgent"||v==="Pending"?"orange":""}">${escapeHTML(v)}</span>`;return escapeHTML(v)}
+function reportsHTML(){const employees=[...new Set([...db.submissions.map(x=>x.employee),...db.calls.map(x=>x.employee)].filter(Boolean))];return `<div class="page-heading"><div><p class="eyebrow">INSIGHTS & DATA</p><h1>Reports <span>& data tools</span></h1><p class="subheading">Review marketing activity and move your existing spreadsheets in or out.</p></div></div><div class="report-grid"><article class="report-card"><h3>Daily marketing activity</h3><p>Export calls and submissions with activity date, employee, vendor and status fields for spreadsheet reporting.</p><button class="button button-secondary" data-export="activity">⇩ Export activity CSV</button></article><article class="report-card"><h3>Employee-wise performance</h3><p>${employees.length?employees.map(n=>`${escapeHTML(n)}: ${db.submissions.filter(x=>x.employee===n).length} submissions, ${db.calls.filter(x=>x.employee===n).length} calls`).join(" · "):"Employee activity totals appear here as records are assigned."}</p><button class="button button-secondary" data-export="employees">⇩ Export employee report</button></article><article class="report-card"><h3>Conversion & placement report</h3><p>Includes submission → interview and interview → placement conversion with consultant, vendor and client details.</p><button class="button button-secondary" data-export="conversion">⇩ Export conversion report</button></article><article class="report-card"><h3>CSV import</h3><p>Import submission sheets, vendor databases, consultants, calls, interviews or follow-ups. A CSV header must match the selected record fields.</p><button class="button button-primary" id="open-import">＋ Import CSV</button></article><article class="report-card"><h3>JSON backup</h3><p>Download a complete portable backup of all records and relationships. Restore a previous BenchTrack backup on this device.</p><button class="button button-secondary" id="backup-json">⇩ Download backup</button> <button class="button button-secondary" id="restore-json">↥ Restore backup</button></article><article class="report-card"><h3>Data privacy</h3><p>Prototype data is stored in this browser only. Do not treat localStorage as secure multi-user storage; use an authenticated backend before storing production PII.</p><span class="badge">Local browser storage</span></article></div>`}
+function openRecord(type,record=null){editId=record?.id||null;const schema=schemas[type];$("#dialog-title").textContent=`${record?"Edit":"Add"} ${schema.singular.toLowerCase()}`;$("#form-kicker").textContent=schema.label.toUpperCase();$("#form-fields").innerHTML=schema.fields.map(field=>fieldHTML(type,field,record?.[field.key]??"",record)).join("");$("#record-dialog").dataset.type=type;$("#record-dialog").showModal()}
+function fieldHTML(type,field,value,record){let options="";if(field.type==="relation"){const target=field.options;const arr=db[target]||[];options=`<option value="">— Select —</option>`+arr.map(x=>`<option value="${x.id}" ${x.id===value?"selected":""}>${escapeHTML(target==="vendors"?`${x.company} — ${x.recruiter}`:target==="submissions"?`${person("consultants",x.consultantId)} — ${x.position}`:x.name)}</option>`).join("")}else if(field.type==="select"){options=`<option value="">— Select —</option>`+field.options.map(x=>`<option ${x===value?"selected":""}>${escapeHTML(x)}</option>`).join("")}
+const required=field.required?"required":"";const val=escapeHTML(value);if(field.type==="textarea")return `<label class="form-field ${["jobDescription","feedback","notes"].includes(field.key)?"full-width":""}"><span>${escapeHTML(field.label)}${field.required?" *":""}</span><textarea name="${field.key}" ${required}>${val}</textarea></label>`;if(field.type==="select"||field.type==="relation")return `<label class="form-field"><span>${escapeHTML(field.label)}${field.required?" *":""}</span><select name="${field.key}" ${required}>${options}</select></label>`;return `<label class="form-field"><span>${escapeHTML(field.label)}${field.required?" *":""}</span><input name="${field.key}" type="${field.type}" value="${val}" ${required} ${field.type==="number"?'step="any"':''}></label>`}
+function bindView(){const root=$("#view-root");root.querySelectorAll("[data-add]").forEach(b=>b.addEventListener("click",()=>openRecord(b.dataset.add)));root.querySelectorAll("[data-go]").forEach(b=>b.addEventListener("click",()=>navigate(b.dataset.go)));root.querySelectorAll("[data-action]").forEach(b=>b.addEventListener("click",()=>rowAction(b)));root.querySelectorAll("[data-export]").forEach(b=>b.addEventListener("click",()=>exportReport(b.dataset.export)));const search=root.querySelector(".local-search");if(search)search.addEventListener("input",e=>{const global=$("#global-search");global.value=e.target.value;render()});const filter=root.querySelector(".control-select[id^=filter]");if(filter)filter.addEventListener("change",()=>render());const sort=root.querySelector("[id^=sort]");if(sort)sort.addEventListener("change",()=>{const type=currentView,order=sort.value;db[type].sort((a,b)=>order==="name"?String(a.name||a.position||a.title||a.company).localeCompare(String(b.name||b.position||b.title||b.company)):order==="created"?(b.createdAt||"").localeCompare(a.createdAt||""):(b.updatedAt||"").localeCompare(a.updatedAt||""));render()});const dates=[root.querySelector("#date-start"),root.querySelector("#date-end")].filter(Boolean);dates.forEach(x=>x.addEventListener("change",render));root.querySelector("#open-import")?.addEventListener("click",openImport);root.querySelector("#backup-json")?.addEventListener("click",backup);root.querySelector("#restore-json")?.addEventListener("click",()=>$("#restore-file").click())}
+function rowAction(button){const {type,id,action}=button.dataset;const row=getById(type,id);if(!row)return;if(action==="edit"){openRecord(type,row);return}if(!confirm(`Delete this ${schemas[type].singular.toLowerCase()}? Related records may retain their links.`))return;db[type]=db[type].filter(x=>x.id!==id);persist();render();notify("Record deleted.")}
+function findDuplicateSubmission(x,exceptId=null){return db.submissions.find(s=>s.id!==exceptId&&s.consultantId===x.consultantId&&String(s.position||"").trim().toLowerCase()===String(x.position||"").trim().toLowerCase()&&String(s.jobId||"").trim().toLowerCase()===String(x.jobId||"").trim().toLowerCase()&&String(s.endClient||"").trim().toLowerCase()===String(x.endClient||"").trim().toLowerCase())}
+function detectVendorDuplicate(x,exceptId=null){return db.vendors.find(v=>v.id!==exceptId&&((x.email&&v.email&&x.email.toLowerCase()===v.email.toLowerCase())||(x.cellPhone&&v.cellPhone&&x.cellPhone.replace(/\D/g,"")===v.cellPhone.replace(/\D/g,""))||(x.company&&x.recruiter&&v.company.toLowerCase()===x.company.toLowerCase()&&v.recruiter.toLowerCase()===x.recruiter.toLowerCase())))}
+$("#record-form").addEventListener("submit",e=>{e.preventDefault();const type=$("#record-dialog").dataset.type,form=new FormData(e.currentTarget),schema=schemas[type],now=new Date().toISOString();const record=Object.fromEntries(schema.fields.map(x=>[x.key,String(form.get(x.key)||"").trim()]));const old=editId?getById(type,editId):null;record.id=editId||uid(type.slice(0,3).toUpperCase());record.createdAt=old?.createdAt||now;record.updatedAt=now;if(type==="submissions"){record.submissionId=old?.submissionId||uid("SUB");if(!record.submittedAt)record.submittedAt=now.slice(0,16);const duplicate=findDuplicateSubmission(record,editId);if(duplicate&&!confirm(`Possible duplicate submission (${duplicate.submissionId||duplicate.id}) for this consultant, position, job ID and client. Save anyway?`))return}if(type==="vendors"){const duplicate=detectVendorDuplicate(record,editId);if(duplicate&&!confirm(`Possible duplicate recruiter/contact already exists under ${duplicate.company}. Save anyway?`))return}if(type==="calls"&&!record.phone&&record.vendorId){const v=getById("vendors",record.vendorId);record.phone=v?.cellPhone||v?.officePhone||""}if(old)db[type]=db[type].map(x=>x.id===editId?record:x);else db[type].push(record);persist();$("#record-dialog").close();editId=null;render();notify(old?"Record updated.":`${schema.singular} added.`)});
+function closeRecord(){$("#record-dialog").close();editId=null}$("#close-dialog").addEventListener("click",closeRecord);$("#cancel-dialog").addEventListener("click",closeRecord);$("#record-dialog").addEventListener("click",e=>{if(e.target===$("#record-dialog"))closeRecord()});
+function csvEscape(x){return `"${String(x??"").replace(/"/g,'""')}"`}function download(filename,text,type="text/csv;charset=utf-8") {const blob=new Blob(["\ufeff",text],{type}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function exportCSV(type){const rows=db[type]||[];if(!rows.length){notify("No records available to export.");return}const fields=["id",...schemas[type].fields.map(f=>f.key),"createdAt","updatedAt"];download(`benchtrack-${type}-${isoToday()}.csv`,[fields.map(csvEscape).join(","),...rows.map(r=>fields.map(k=>csvEscape(r[k])).join(","))].join("\r\n"))}
+function exportReport(kind){if(kind==="employees"){const names=[...new Set([...db.submissions.map(x=>x.employee),...db.calls.map(x=>x.employee)].filter(Boolean))];const rows=[["Employee","Submissions","Calls"],...names.map(n=>[n,db.submissions.filter(x=>x.employee===n).length,db.calls.filter(x=>x.employee===n).length])];download(`benchtrack-employee-report-${isoToday()}.csv`,rows.map(r=>r.map(csvEscape).join(",")).join("\r\n"));return}if(kind==="conversion"){const rows=[["Submission ID","Consultant","Position","Vendor","Client","Status","Submission to interview","Interview to placement"],...db.submissions.map(s=>[s.submissionId||s.id,person("consultants",s.consultantId),s.position,person("vendors",s.vendorId),s.endClient,s.status,["Interview Scheduled","Interview Completed","Offer Received","Placed"].includes(s.status)?"Yes":"No",s.status==="Placed"?"Yes":"No"])];download(`benchtrack-conversion-${isoToday()}.csv`,rows.map(r=>r.map(csvEscape).join(",")).join("\r\n"));return}const rows=[["Type","Date","Employee","Vendor","Consultant","Position / subject","Status / outcome"],...db.submissions.map(s=>["Submission",s.submittedAt,s.employee,person("vendors",s.vendorId),person("consultants",s.consultantId),s.position,s.status]),...db.calls.map(c=>["Call",c.dateTime,c.employee,person("vendors",c.vendorId),person("consultants",c.consultantId),c.position,c.direction+" / "+c.outcome])];download(`benchtrack-activity-${isoToday()}.csv`,rows.map(r=>r.map(csvEscape).join(",")).join("\r\n"))}
+function backup(){download(`benchtrack-backup-${isoToday()}.json`,JSON.stringify({app:"BenchTrack CRM",version:1,exportedAt:new Date().toISOString(),data:db},null,2),"application/json");notify("JSON backup downloaded.")}
+function openImport(){const sel=$("#import-type");sel.innerHTML=Object.entries(schemas).map(([k,v])=>`<option value="${k}">${escapeHTML(v.label)}</option>`).join("");$("#import-dialog").showModal()}$("#open-import")?.addEventListener("click",openImport);$("#close-import").addEventListener("click",()=>$("#import-dialog").close());$("#cancel-import").addEventListener("click",()=>$("#import-dialog").close());$("#import-form").addEventListener("submit",async e=>{e.preventDefault();const file=$("#csv-file").files[0],type=$("#import-type").value;if(!file)return;try{const text=await file.text(),records=parseCSV(text),headers=records.shift().map(x=>x.trim());const allowed=new Set(["id",...schemas[type].fields.map(x=>x.key)]);let count=0;records.forEach(row=>{if(!row.some(Boolean))return;const obj={};headers.forEach((h,i)=>{if(allowed.has(h))obj[h]=row[i]??""});if(type==="submissions"&&!obj.consultantId){const c=db.consultants.find(x=>x.name?.toLowerCase()===String(obj.consultant||obj.consultantName||"").toLowerCase());if(c)obj.consultantId=c.id}obj.id=obj.id||uid(type.slice(0,3).toUpperCase());obj.createdAt=new Date().toISOString();obj.updatedAt=obj.createdAt;if(type==="submissions")obj.submissionId=obj.submissionId||uid("SUB");db[type].push(obj);count++});persist();$("#import-dialog").close();render();notify(`${count} ${schemas[type].label.toLowerCase()} imported.`)}catch(err){console.error(err);notify("CSV could not be imported. Check the file format.")}});
+function parseCSV(text){const rows=[];let row=[],cell="",quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'&&quoted&&text[i+1]==='"'){cell+='"';i++}else if(c==='"'){quoted=!quoted}else if(c===","&&!quoted){row.push(cell);cell=""}else if((c==="\n"||c==="\r")&&!quoted){if(c==="\r"&&text[i+1]==="\n")i++;row.push(cell);rows.push(row);row=[];cell=""}else cell+=c}if(cell.length||row.length){row.push(cell);rows.push(row)}return rows}
+$("#restore-file").addEventListener("change",async e=>{const file=e.target.files[0];if(!file)return;try{const parsed=JSON.parse(await file.text()),data=parsed.data;if(!data||!Object.keys(schemas).every(k=>Array.isArray(data[k])))throw new Error("Invalid backup");if(!confirm("Restore this backup and replace all BenchTrack data currently stored in this browser?"))return;db=data;persist();render();notify("Backup restored.")}catch(err){notify("Invalid backup file.")}finally{e.target.value=""}});
+function globalSearchChanged(){if(currentView==="dashboard")return;render()}$("#global-search").addEventListener("input",globalSearchChanged);$("#navigation").addEventListener("click",e=>{const btn=e.target.closest("[data-view]");if(btn)navigate(btn.dataset.view)});$("#quick-add").addEventListener("click",()=>openRecord(currentView in schemas?currentView:"submissions"));
+const theme=$("#theme-toggle");function applyTheme(v){document.documentElement.dataset.theme=v;theme.textContent=v==="dark"?"☀":"☾";theme.title=v==="dark"?"Switch to light mode":"Switch to dark mode"}applyTheme(localStorage.getItem(THEME_KEY)==="dark"?"dark":"light");theme.addEventListener("click",()=>{const next=document.documentElement.dataset.theme==="dark"?"light":"dark";localStorage.setItem(THEME_KEY,next);applyTheme(next)});
 render();

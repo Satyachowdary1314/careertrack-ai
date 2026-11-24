@@ -1,104 +1,70 @@
-# CareerTrack AI
+# BenchTrack CRM
 
-A beginner-friendly job application tracker built with plain HTML, CSS, and JavaScript. No server, API key, installation, or paid service is required.
+BenchTrack CRM is a responsive, browser-based prototype for C2C bench sales and IT staffing marketing teams. It replaces scattered tracking sheets with linked consultant, recruiter/vendor, submission, call, interview and follow-up records. It uses plain HTML, CSS and JavaScript and requires no paid service, build step or API key.
 
 ## Features
 
-- Responsive dashboard with light and dark themes
-- Add, edit, and delete applications
-- Store company, role, salary, recruiter, application date, status, interview date, job link, and notes
-- Search by company, role, recruiter, or salary
-- Filter applications by status
-- Application status analytics
-- Monthly interview calendar
-- Export application data as CSV
-- Save applications and theme preference in browser local storage
+- Dashboard metrics for submissions, incoming/outgoing/missed calls, vendors, active consultants, follow-ups, interviews, placements and conversion rates.
+- Date-range filtering for submission and call activity; employee-wise activity visualization.
+- CRUD screens for consultants, vendor/recruiter contacts, submissions, calls, interviews and follow-ups, with search, status filtering and sorting.
+- Unique generated record and submission IDs, timestamps, consultant/vendor/submission relationships, duplicate contact warning and duplicate submission warning.
+- Click-to-call and click-to-email links; interview schedule and follow-up reminders.
+- CSV export for modules and activity, employee and conversion reports; CSV import for all record types.
+- Portable JSON backup and restore, responsive layout, and persistent light/dark mode.
+- Fictional sample records only. Seeded email addresses use the reserved `example.test` domain and phone numbers use fictional 555 ranges.
 
-## Run the project on Windows
+## Run locally
 
-1. Download and install **Visual Studio Code** from [code.visualstudio.com](https://code.visualstudio.com/).
-2. Create a folder on your computer named `careertrack-ai`.
-3. In Visual Studio Code, choose **File → Open Folder...**, then select `careertrack-ai`.
-4. Create the files shown in the project structure:
-   - `index.html`
-   - `styles.css`
-   - `app.js`
-   - `README.md`
-   - `.gitignore`
-5. Copy the contents for each file into the matching file and save with **Ctrl+S**.
-6. Open the project folder in File Explorer and double-click `index.html`. The website will open in your default browser.
+1. Download or clone this repository.
+2. Open `index.html` in a current desktop or mobile browser. Optionally use VS Code Live Server for automatic refresh.
+3. All records are stored in browser `localStorage` under `benchtrack-crm-v1`. Data remains on this browser/device and does not sync to another user or device. Use **Reports → Download backup** regularly.
 
-You can also install the **Live Server** extension in VS Code. After installing it, right-click `index.html` and select **Open with Live Server**. This refreshes the browser when you save code changes.
+No npm install, server, paid service, credentials, or API keys are needed.
 
-## Where your data is saved
+## CSV import format
 
-Applications and theme preference are stored in the browser's local storage on your device. They are not uploaded to a server and do not automatically sync between browsers or devices. Clearing the browser's site data may delete them. Export a CSV backup periodically if you want to keep a separate copy.
+Choose **Reports → Import CSV**, select a record type and upload a UTF-8 CSV. Headers should match the field keys used in the form, such as `name`, `technology`, `company`, `recruiter`, `position`, `jobId`, `status`, `direction`, `dateTime`, `dueDate`, `employee`, and `notes`. Unknown columns are ignored. Relationship fields should contain the corresponding internal record ID; import consultants/vendors first, then link records by editing them. CSV import is additive and does not automatically deduplicate entries. Export the current JSON backup before importing substantial data.
 
-## Create a GitHub repository and upload the project
+## Data model and future backend
 
-1. Create a GitHub account at [github.com](https://github.com/) if you do not already have one.
-2. Sign in, select the **+** button in the upper-right corner, then choose **New repository**.
-3. Enter a repository name, such as `careertrack-ai`.
-4. Choose **Public** if you want to use GitHub Pages for free.
-5. Leave **Add a README file** unchecked if you already created the README locally.
-6. Select **Create repository**.
-7. On the new repository page, choose **uploading an existing file**.
-8. Open your `careertrack-ai` folder in File Explorer. Drag `index.html`, `styles.css`, `app.js`, `README.md`, and `.gitignore` into the GitHub upload area.
-9. Enter a commit message such as `Add CareerTrack AI website`.
-10. Select **Commit changes**.
+Each entity has a unique `id`, `createdAt` and `updatedAt`; submissions also get a display-facing `submissionId`. Foreign-key style ID fields connect submissions, calls, interviews and follow-ups to related records. `loadDB()` and `persist()` isolate the storage adapter from the interface, so they can be replaced by API calls to a Supabase/PostgreSQL service.
 
-### Upload with Git (optional)
+This prototype deliberately has no authentication, authorization, server-side validation, encryption, or multi-user synchronization. Browser localStorage is not a secure data store. Before production use, implement a backend with row-level access policies, authenticated employee accounts and administrator roles, server-enforced relationships, audit logging, backups, and appropriate handling of consultant contact and work-authorization data. Do not use this demo with real sensitive personal information.
 
-If Git is installed, you can upload from PowerShell:
+## Replace project files and push to your existing GitHub repository
 
-1. On the repository page, select **Code**, copy the HTTPS URL, and replace the example URL below with it.
-2. Open PowerShell and change directory to your project folder. For example:
+The existing repository is `https://github.com/Satyachowdary1314/careertrack-ai`. Replace the root `index.html`, `styles.css`, `app.js`, `README.md`, and `.gitignore` with the versions in this project. Keep the filenames and root-level locations unchanged. The `.gitignore` below is suitable for the static prototype.
+
+### Using Git on Windows PowerShell
+
+1. Install Git if needed and open PowerShell in your existing local project folder.
+2. Make a backup copy of the current folder before replacing files. Copy the updated five files into the folder and overwrite the old versions.
+3. Run:
 
    ```powershell
-   cd $HOME\Desktop\careertrack-ai
+   git status
+   git add index.html styles.css app.js README.md .gitignore
+   git commit -m "Replace CareerTrack AI with BenchTrack CRM"
+   git push origin main
    ```
 
-3. Run these commands:
+4. If your local checkout has no `origin`, add it once with `git remote add origin https://github.com/Satyachowdary1314/careertrack-ai.git`. If your current branch is not `main`, push your current branch or open a pull request instead of forcing a push.
 
-   ```powershell
-   git init
-   git add .
-   git commit -m "Add CareerTrack AI website"
-   git branch -M main
-   git remote add origin https://github.com/YOUR-USERNAME/careertrack-ai.git
-   git push -u origin main
-   ```
+### Using GitHub in a browser
 
-4. If Git asks you to sign in, follow the browser sign-in prompt.
+Open the existing repository, select each of the five files, choose **Edit this file**, replace its full contents, and commit the changes. You can also use **Add file → Upload files** to upload all five replacements together. Review the diff before committing. Do not create a new repository for this update.
 
-## Deploy with GitHub Pages
+## Optional GitHub Pages
 
-1. Open your repository on GitHub.
-2. Select **Settings**.
-3. In the left sidebar, select **Pages** (usually under **Code and automation**).
-4. Under **Build and deployment**, set **Source** to **Deploy from a branch**.
-5. Choose the `main` branch and the `/(root)` folder.
-6. Select **Save**.
-7. Wait a few minutes, then refresh the Pages settings. GitHub will show your website URL, usually:
-   `https://YOUR-USERNAME.github.io/careertrack-ai/`
-8. Open that URL to see your deployed site.
-
-After making changes, upload/commit them to the same branch. GitHub Pages will publish the updated site automatically.
+This is a static website. In the repository **Settings → Pages**, deploy from the desired branch and root folder. After publication, open the Pages URL. GitHub Pages hosts the interface but does not centralize localStorage records across users.
 
 ## Project structure
 
 ```text
 careertrack-ai/
-├── index.html    # Page structure and form
-├── styles.css    # Layout, colors, and responsive styles
-├── app.js        # Application logic and local storage
-├── README.md     # Project and setup instructions
-└── .gitignore    # Files Git should ignore
+├── index.html    # BenchTrack CRM page structure
+├── styles.css    # Responsive enterprise interface and themes
+├── app.js        # Data model, browser storage, reports and interactions
+├── README.md     # Setup, data, privacy and Git instructions
+└── .gitignore
 ```
-
-## Troubleshooting
-
-- If the page looks unstyled, check that `styles.css` is in the same folder as `index.html` and the file name is spelled exactly right.
-- If buttons do not work, check that `app.js` is in the same folder and spelled exactly right.
-- If GitHub Pages shows a 404, confirm the repository has an `index.html` in its root and that Pages is configured to deploy from the correct branch and `/(root)` folder.
-- If your changes are not visible after deployment, wait a few minutes and refresh the page. A hard refresh on Windows is **Ctrl+F5**.
